@@ -26,8 +26,17 @@ const startLogging = (processInfo: ProcessInfo) => {
 };
 
 app.post("/create-process", (req: Request, res: Response) => {
-  const script = spawn("node", ["dist/timeLogger.js"]); 
+  const script = spawn("node");
   const creationTime = new Date().toLocaleString();
+  script.on("error", (err) => {
+    console.error("Failed to start the process:", err);
+    res.status(500).send("Failed to start the process.");
+  });
+
+  script.on("exit", (code, signal) => {
+    console.error(`Process exited with code ${code} and signal ${signal}`);
+  });
+
   if (script.pid !== undefined) {
     const processInfo: ProcessInfo = {
       PID: script.pid,
@@ -35,21 +44,13 @@ app.post("/create-process", (req: Request, res: Response) => {
       Logs: [creationTime],
     };
     processes.push(processInfo);
-    const stopLogging = startLogging(processInfo);
-    script.on("close", () => {
-      stopLogging();
-      const index = processes.findIndex((p) => p.PID === script.pid);
-      if (index !== -1) {
-        processes.splice(index, 1);
-      }
-    });
+    startLogging(processInfo);
 
     res.json(processInfo);
   } else {
     res.status(500).send("Failed to start the process.");
   }
 });
-
 app.get("/get-all", (req: Request, res: Response) => {
   const detailedProcesses = processes.map((process) => ({
     PID: process.PID,
@@ -71,18 +72,16 @@ app.get("/get-single/:id", (req: Request, res: Response) => {
 
 app.delete("/delete-process/:id", (req: Request, res: Response) => {
   const pid = Number(req.params.id);
-  const processIndex = processes.findIndex((p) => p.PID === pid);
-  if (processIndex === -1) {
-    res.status(404).send("Process not found.");
-    return;
-  }
-
   try {
     process.kill(pid, "SIGTERM");
-    processes[processIndex].Logs = processes[processIndex].Logs.map(
-      (log) => `Finalized Log: ${log}`
-    );
-    processes.splice(processIndex, 1);
+    const processIndex = processes.findIndex((p) => p.PID === pid);
+    if (processIndex !== -1) {
+      processes[processIndex].Logs = processes[processIndex].Logs.map(
+        (log) => `Finalized Log: ${log}`
+      );
+      processes.splice(processIndex, 1);
+    }
+
     res.status(200).send(`${pid} The process has been deleted successfully`);
   } catch (error) {
     res.status(500).send("Failed to terminate process.");
